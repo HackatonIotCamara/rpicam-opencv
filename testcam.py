@@ -1,8 +1,15 @@
 #!/usr/bin/env python
 # -*- cimport numpy as np
+import sys
 import argparse
 import numpy as np
-import cv2
+try:
+	import cv2
+except ImportError:
+	# Workaround Ubuntu import errors
+	sys.path.append('/usr/lib/python2.7/dist-packages')
+	sys.path.append('/usr/local/lib/python2.7/site-packages')
+	import cv2
 from pprint import pprint
 
 def startcamera(cameraindex):
