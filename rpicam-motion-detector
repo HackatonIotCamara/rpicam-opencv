@@ -5,16 +5,48 @@ import time
 import ftplib
 import logging
 
+# Import smtplib for the actual sending function
+import smtplib
+
+# Here are the email package modules we'll need
+from email.mime.image import MIMEImage
+from email.mime.multipart import MIMEMultipart
+
 server="127.0.0.1"
 user="user"
 password="password"
 secure=False
 
+email_from = "psaavedra@igaia.com"
+email_to="clopez@igalia.com"
 
 log = logging.getLogger()
 ch = logging.StreamHandler()
 log.addHandler(ch)
 
+
+def send_email(eventname, filename):
+    '''
+    Assumes a SMTP server in the localhost
+
+    #XXX: Not yet tested
+    '''
+
+    # Create the container (outer) email message.
+    msg = MIMEMultipart()
+    msg['Subject'] = '[rpicam-alert]: %s' % eventname
+    msg['From'] = email_from
+    msg['To'] = email_to
+    msg.preamble = 'Something is happing in your house!!!'
+    fp = open(filename, 'rb')
+    img = MIMEImage(fp.read())
+    fp.close()
+    msg.attach(img)
+
+    # Send the email via our own SMTP server.
+    s = smtplib.SMTP('localhost')
+    s.sendmail(to, [email], msg.as_string())
+    s.quit()
 
 
 def ftp_upload(server,user,password, filename, secure=False):
@@ -93,6 +125,10 @@ class MotionDetectorInstantaneous():
                             self.isRecording = True
                             self.initRecorder(eventname)
                         cv.SaveImage(eventname + ".jpg", self.frame)     # save frame as JPEG file
+                        try:
+                            send_email(eventname, eventname + ".jpg")
+                        except Exception, e:
+                            log.error("Problem sending the email alert: %s" % e)
             else:
                 if instant >= self.trigger_time + 10: #Record during 10 seconds
                     print datetime.now().strftime("%b %d, %H:%M:%S"), "Stop recording"
