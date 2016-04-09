@@ -4,7 +4,13 @@ from datetime import datetime
 import time
 import ftplib
 import logging
-from gpiozero import LED
+try:
+    from gpiozero import LED
+except:
+    from dummyled import LED
+import ConfigParser
+import argparse
+import os, sys
 
 # Import smtplib for the actual sending function
 import smtplib
@@ -13,32 +19,21 @@ import smtplib
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 
-server="127.0.0.1"
-user="user"
-password="password"
-secure=False
-
-email_from = "psaavedra@igaia.com"
-email_to="clopez@igalia.com"
-
 log = logging.getLogger()
 ch = logging.StreamHandler()
 log.addHandler(ch)
 
 led1 = LED(17)
 
+
+
+
 def send_email(eventname, filename):
-    '''
-    Assumes a SMTP server in the localhost
-
-    #XXX: Not yet tested
-    '''
-
     # Create the container (outer) email message.
     msg = MIMEMultipart()
     msg['Subject'] = '[rpicam-alert]: %s' % eventname
-    msg['From'] = email_from
-    msg['To'] = email_to
+    msg['From'] = config['mail']['from']
+    msg['To'] = config['mail']['to']
     msg.preamble = 'Something is happing in your house!!!'
     fp = open(filename, 'rb')
     img = MIMEImage(fp.read())
@@ -46,9 +41,15 @@ def send_email(eventname, filename):
     msg.attach(img)
 
     # Send the email via our own SMTP server.
-    s = smtplib.SMTP('localhost')
-    s.sendmail(to, [email], msg.as_string())
-    s.quit()
+    if get_boolean(config['smtp']['ssl']):
+        smptserver = smtplib.SMTP_SSL(config['smtp']['address'], config['smtp']['port'])
+    else:
+        smptserver = smtplib.SMTP(config['smtp']['address'], config['smtp']['port'])
+    smptserver.ehlo()
+    smptserver.login(config['smtp']['user'], config['smtp']['password'])
+    smptserver.sendmail(config['mail']['from'], config['mail']['to'], msg.as_string())
+    smptserver.quit()
+    print ("Sent email to %s" %config['mail']['to'])
 
 
 def ftp_upload(server,user,password, filename, secure=False):
@@ -71,7 +72,7 @@ class MotionDetectorInstantaneous():
         self.threshold = val
 
     def __init__(self,threshold=8, doRecord=True, showWindows=True,
-            uploadVideo=True):
+                uploadVideo=True, camera_index=0):
         self.writer = None
         self.font = None
         self.doRecord=doRecord #Either or not record the moving object
@@ -79,7 +80,7 @@ class MotionDetectorInstantaneous():
         self.frame = None
         self.upload_video = uploadVideo
 
-        self.capture=cv.CaptureFromCAM(0)
+        self.capture=cv.CaptureFromCAM(camera_index)
         self.frame = cv.QueryFrame(self.capture) #Take a frame to init recorder
 
         self.frame1gray = cv.CreateMat(self.frame.height, self.frame.width, cv.CV_8U) #Gray frame at t-1
@@ -133,8 +134,7 @@ class MotionDetectorInstantaneous():
                         try:
                             send_email(eventname, eventname + ".jpg")
                         except Exception, e:
-                            print 'TODO: Send the email alert..'
-#                            log.error("Problem sending the email alert: %s" % e)
+                            log.error("Problem sending the email alert: %s" % e)
             else:
                 if instant >= self.trigger_time + 3: #Record during 10 seconds
                     print datetime.now().strftime("%b %d, %H:%M:%S"), "Stop recording"
@@ -184,7 +184,35 @@ class MotionDetectorInstantaneous():
         else:
             return False
 
+def dict_from_config(config):
+    dictconfig = {}
+    sections = config.sections()
+    for section in sections:
+        dictconfig[section] = {}
+        options = config.options(section)
+        for option in options:
+            dictconfig[section][option] = config.get(section, option)
+    return dictconfig
+
+def get_boolean(configvalue):
+    if configvalue == "yes":
+        return True
+    return False
+
 if __name__=="__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--configpath", help="The config file path. By default: rpi-asci.conf", default="rpi-asci.conf")
+    args = vars(ap.parse_args())
+    configpath = args["configpath"]
+    if not os.path.isfile(configpath):
+        raise ValueError("Can't find config file %s" %(configpath))
+    if not os.access(configpath, os.R_OK):
+       raise ValueError("Can't read config file %s" %(configpath))
+    cfgparser = ConfigParser.ConfigParser()
+    cfgparser.read(configpath)
+    config = dict_from_config(cfgparser)
     detect = MotionDetectorInstantaneous(threshold=8, doRecord=True,
-                                         showWindows=False, uploadVideo=True)
+                                         showWindows=get_boolean(config['camera']['show_video_window']),
+                                         uploadVideo=True,
+                                         camera_index=int(config['camera']['index_number']))
     detect.run()
