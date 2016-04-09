@@ -2,6 +2,31 @@
 import cv2.cv as cv
 from datetime import datetime
 import time
+import ftplib
+import logging
+
+server="127.0.0.1"
+user="user"
+password="password"
+secure=False
+
+
+log = logging.getLogger()
+ch = logging.StreamHandler()
+log.addHandler(ch)
+
+
+
+def ftp_upload(server,user,password, filename, secure=False):
+    if secure:
+        session = ftplib.FTP(server,user,password)
+    else:
+        session = ftplib.FTP_TLS(server,user,password)
+    file = open(filename,'rb')                  # file to send
+    session.storbinary('STOR %s' % filename, file)     # send the file
+    file.close()                                    # close file and FTP
+    session.quit()
+
 
 class MotionDetectorInstantaneous():
     '''
@@ -11,12 +36,14 @@ class MotionDetectorInstantaneous():
     def onChange(self, val): #callback when the user change the detection threshold
         self.threshold = val
     
-    def __init__(self,threshold=8, doRecord=True, showWindows=True):
+    def __init__(self,threshold=8, doRecord=True, showWindows=True,
+            uploadVideo=True):
         self.writer = None
         self.font = None
         self.doRecord=doRecord #Either or not record the moving object
         self.show = showWindows #Either or not show the 2 windows
         self.frame = None
+        self.upload_video = uploadVideo
     
         self.capture=cv.CaptureFromCAM(0)
         self.frame = cv.QueryFrame(self.capture) #Take a frame to init recorder
@@ -69,10 +96,12 @@ class MotionDetectorInstantaneous():
             else:
                 if instant >= self.trigger_time + 10: #Record during 10 seconds
                     print datetime.now().strftime("%b %d, %H:%M:%S"), "Stop recording"
-                    # TODO: The video videofilename should be uploaded to
-                    # a FTP
-                    # ftp_upload(self.user,self.password,self.upload_url)
                     self.isRecording = False
+                    if self.upload_video:
+                        try:
+                            ftp_upload(server,user,password, eventname + ".mjpeg", secure=False)
+                        except Exception, e:
+                            log.error("Problem uploading video to FTP: %s" % e)
                 else:
                     cv.PutText(curframe,datetime.now().strftime("%b %d, %H:%M:%S"), (25,30),self.font, 0) #Put date on the frame
                     cv.WriteFrame(self.writer, curframe) #Write the frame
@@ -113,5 +142,6 @@ class MotionDetectorInstantaneous():
             return False
         
 if __name__=="__main__":
-    detect = MotionDetectorInstantaneous(threshold=8, doRecord=True, showWindows=False)
+    detect = MotionDetectorInstantaneous(threshold=8, doRecord=True,
+                                         showWindows=False, uploadVideo=True)
     detect.run()
